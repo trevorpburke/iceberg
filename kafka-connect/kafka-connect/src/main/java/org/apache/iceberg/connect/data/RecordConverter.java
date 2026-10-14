@@ -154,6 +154,8 @@ class RecordConverter {
       case UUID:
         return convertUUID(value);
       case BINARY:
+      case GEOMETRY:
+      case GEOGRAPHY:
         return convertBase64Binary(value);
       case FIXED:
         return ByteBuffers.toByteArray(convertBase64Binary(value));
