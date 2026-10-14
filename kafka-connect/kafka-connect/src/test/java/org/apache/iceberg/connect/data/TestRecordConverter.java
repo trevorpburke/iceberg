@@ -25,6 +25,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -65,6 +66,8 @@ import org.apache.iceberg.types.Types.DecimalType;
 import org.apache.iceberg.types.Types.DoubleType;
 import org.apache.iceberg.types.Types.FixedType;
 import org.apache.iceberg.types.Types.FloatType;
+import org.apache.iceberg.types.Types.GeographyType;
+import org.apache.iceberg.types.Types.GeometryType;
 import org.apache.iceberg.types.Types.IntegerType;
 import org.apache.iceberg.types.Types.ListType;
 import org.apache.iceberg.types.Types.LongType;
@@ -160,6 +163,15 @@ public class TestRecordConverter {
 
   private static final org.apache.iceberg.Schema VARIANT_SCHEMA =
       new org.apache.iceberg.Schema(NestedField.required(1, "v", VariantType.get()));
+
+  private static final org.apache.iceberg.Schema GEO_SCHEMA =
+      new org.apache.iceberg.Schema(
+          NestedField.optional(1, "geom", GeometryType.crs84()),
+          NestedField.optional(2, "geog", GeographyType.crs84()));
+
+  private static final byte WKB_LITTLE_ENDIAN = 1;
+  private static final int WKB_POINT_TYPE = 1;
+  private static final int WKB_POINT_SIZE = 21;
 
   private static final Schema CONNECT_SCHEMA =
       SchemaBuilder.struct()
@@ -1522,6 +1534,43 @@ public class TestRecordConverter {
 
     assertThat(updateMap.get("st.ii").type()).isInstanceOf(LongType.class);
     assertThat(updateMap.get("st.ff").type()).isInstanceOf(DoubleType.class);
+  }
+
+  @Test
+  void convertGeometryFromWkbBytes() {
+    Table table = mock(Table.class);
+    when(table.schema()).thenReturn(GEO_SCHEMA);
+    RecordConverter converter = new RecordConverter(table, config);
+
+    byte[] wkb = wkbPoint(1.0, 2.0);
+    Schema connectSchema = SchemaBuilder.struct().field("geom", Schema.BYTES_SCHEMA).build();
+    Struct data = new Struct(connectSchema).put("geom", wkb);
+
+    Record record = converter.convert(data);
+    assertThat(record.getField("geom")).isEqualTo(ByteBuffer.wrap(wkb));
+  }
+
+  @Test
+  void convertGeographyFromBase64String() {
+    Table table = mock(Table.class);
+    when(table.schema()).thenReturn(GEO_SCHEMA);
+    RecordConverter converter = new RecordConverter(table, config);
+
+    byte[] wkb = wkbPoint(-122.4, 37.8);
+    Map<String, Object> data = ImmutableMap.of("geog", Base64.getEncoder().encodeToString(wkb));
+
+    Record record = converter.convert(data);
+    assertThat(record.getField("geog")).isEqualTo(ByteBuffer.wrap(wkb));
+  }
+
+  private static byte[] wkbPoint(double lon, double lat) {
+    return ByteBuffer.allocate(WKB_POINT_SIZE)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .put(WKB_LITTLE_ENDIAN)
+        .putInt(WKB_POINT_TYPE)
+        .putDouble(lon)
+        .putDouble(lat)
+        .array();
   }
 
   private RecordConverter variantConverter() {
